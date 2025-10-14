@@ -1,63 +1,62 @@
 import os
 import json
-import hashlib
-import hmac
-import uuid
+import requests
 from pathlib import Path
 
-# Secret key for HMAC – keep this secret and offline
-SECRET_KEY = b"YourVerySecretKeyHere12345"
+APP_NAME = "Inspecto"
+LICENSE_FILE = os.path.join(os.getenv("APPDATA"), APP_NAME, "license.json")
+GUMROAD_API = "https://api.gumroad.com/v2/licenses/verify"
+PRODUCT_PERMALINK = "inspecto-pro"  # ← replace with your Gumroad product permalink
 
-# Pre-generated valid keys (replace with your actual 1000 keys)
-VALID_KEYS = {
-    "ABCD1234EFGH5678": "SIGNATURE1",
-    "IJKL9012MNOP3456": "SIGNATURE2",
-    # ...
-}
 
-LICENSE_FILE = Path.home() / ".inspecto_license.json"
+def ensure_license_folder():
+    folder = os.path.dirname(LICENSE_FILE)
+    os.makedirs(folder, exist_ok=True)
 
-def generate_hmac(key: str, machine_id: str) -> str:
-    """Create a signature for a key + machine ID."""
-    data = f"{key}:{machine_id}".encode("utf-8")
-    return hmac.new(SECRET_KEY, data, hashlib.sha256).hexdigest()
 
-def get_machine_id() -> str:
-    """Generate a unique machine ID for binding."""
-    mac = uuid.getnode()
-    return hashlib.sha256(str(mac).encode()).hexdigest()
+def save_license_locally(license_key, purchase_info):
+    ensure_license_folder()
+    data = {"license_key": license_key, "purchase_info": purchase_info}
+    with open(LICENSE_FILE, "w") as f:
+        json.dump(data, f)
 
-def is_pro() -> bool:
-    """Check if current machine has a valid Pro license."""
-    if not LICENSE_FILE.exists():
-        return False
+
+def load_license():
+    if not os.path.exists(LICENSE_FILE):
+        return None
     try:
-        data = json.loads(LICENSE_FILE.read_text())
-        key = data.get("key")
-        machine_id = data.get("machine_id")
-        signature = data.get("signature")
-        if not key or not machine_id or not signature:
-            return False
-        expected_sig = generate_hmac(key, machine_id)
-        return signature == expected_sig
-    except Exception:
-        return False
+        with open(LICENSE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return None
 
-def validate_key_format(key: str) -> bool:
-    """Optional: check key pattern (16 alphanumeric chars)."""
-    return len(key) == 16 and key.isalnum()
 
-def save_license(key: str):
-    """Bind the key to this machine and save locally."""
-    machine_id = get_machine_id()
-    signature = generate_hmac(key, machine_id)
-    data = {
-        "key": key,
-        "machine_id": machine_id,
-        "signature": signature
-    }
-    LICENSE_FILE.write_text(json.dumps(data))
+def verify_license_online(license_key):
+    """Verify license using Gumroad API"""
+    data = {"product_permalink": PRODUCT_PERMALINK, "license_key": license_key}
+    try:
+        r = requests.post(GUMROAD_API, data=data, timeout=8)
+        r.raise_for_status()
+        response = r.json()
 
-def verify_key_offline(key: str) -> bool:
-    """Check if a key exists in your pre-generated list."""
-    return key in VALID_KEYS
+        if response.get("success"):
+            save_license_locally(license_key, response["purchase"])
+            email = response["purchase"].get("email", "unknown user")
+            return True, f"✅ License activated for {email}"
+        else:
+            return False, f"❌ {response.get('message', 'Invalid license key')}"
+    except Exception as e:
+        return False, f"⚠️ Network or server error: {e}"
+
+
+def is_pro():
+    """Check if local license exists and seems valid"""
+    lic = load_license()
+    return lic is not None and "license_key" in lic
+
+
+def get_registered_email():
+    lic = load_license()
+    if lic and "purchase_info" in lic:
+        return lic["purchase_info"].get("email")
+    return None

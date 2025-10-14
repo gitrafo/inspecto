@@ -14,7 +14,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from io import BytesIO
-import license_manager
+from license_manager import verify_license_online, is_pro, get_registered_email, is_pro
 
 class ImageLoaderThread(QThread):
     progress_changed = pyqtSignal(int, int, str)  # current, total, tag
@@ -216,7 +216,7 @@ class InspectoApp(QWidget):
         self.update_pro_status()
 
     def update_pro_status(self):
-        if license_manager.is_pro():
+        if is_pro():
             self.pro_status_label.setText("Status: Pro ✅")
             self.pro_status_label.setStyleSheet("color: green; font-weight: bold;")
             self.export_pdf_button.setEnabled(True)
@@ -226,32 +226,30 @@ class InspectoApp(QWidget):
             self.export_pdf_button.setEnabled(False)
 
     def unlock_pro_features(self):
-        QMessageBox.information(self, "Pro Unlocked", "All Pro features are now available.")
         self.update_pro_status()
+        QMessageBox.information(self, "Pro Unlocked", "All Pro features are now available.")
 
 
     def activate_pro(self):
-        if license_manager.is_pro():
-            QMessageBox.information(self, "Already Pro", "You already have a valid Pro license! 🎉")
+        if is_pro():
+            email = get_registered_email()
+            QMessageBox.information(self, "Already Pro", f"You already have a valid Pro license! 🎉\nRegistered to: {email or 'Unknown user'}")
             return
 
         key, ok = QInputDialog.getText(self, "Activate Inspecto Pro", "Enter your license key:")
         if ok and key:
             key = key.strip().upper()
-            if not license_manager.validate_key_format(key):
-                QMessageBox.warning(self, "Invalid Key", "The license key format is incorrect.")
-                return
-
-            if license_manager.verify_key_offline(key):
-                license_manager.save_license(key)
-                QMessageBox.information(self, "Success", "Inspecto Pro activated! ✅")
+            # Online verification via Gumroad
+            success, message = verify_license_online(key)
+            if success:
+                QMessageBox.information(self, "Success", f"Inspecto Pro activated! ✅\n{message}")
                 self.unlock_pro_features()
             else:
-                QMessageBox.warning(self, "Invalid Key", "This license key is not valid.")
+                QMessageBox.warning(self, "Activation Failed", message)
 
 
     def on_export_clicked(self):
-        if not license_manager.is_pro():
+        if not is_pro():
             QMessageBox.warning(self, "Pro Feature", "Export to PowerPoint is a Pro feature. Please activate your license.")
             return
 
