@@ -1,49 +1,63 @@
 import os
 import json
+import hashlib
+import hmac
+import uuid
+from pathlib import Path
 
-APP_NAME = "Inspecto"
-LICENSE_FILE = os.path.join(os.getenv("APPDATA"), APP_NAME, "license.json")
+# Secret key for HMAC – keep this secret and offline
+SECRET_KEY = b"YourVerySecretKeyHere12345"
 
-# List of valid Pro keys
-VALID_KEYS = [
-    "INSPECTO-PRO-2025-0001",
-    "INSPECTO-PRO-2025-0002",
-    "INSPECTO-PRO-2025-0003",
-]
+# Pre-generated valid keys (replace with your actual 1000 keys)
+VALID_KEYS = {
+    "ABCD1234EFGH5678": "SIGNATURE1",
+    "IJKL9012MNOP3456": "SIGNATURE2",
+    # ...
+}
 
-def ensure_license_folder():
-    folder = os.path.dirname(LICENSE_FILE)
-    os.makedirs(folder, exist_ok=True)
+LICENSE_FILE = Path.home() / ".inspecto_license.json"
 
-def save_license(key):
-    ensure_license_folder()
-    data = {"key": key}
-    with open(LICENSE_FILE, "w") as f:
-        json.dump(data, f)
+def generate_hmac(key: str, machine_id: str) -> str:
+    """Create a signature for a key + machine ID."""
+    data = f"{key}:{machine_id}".encode("utf-8")
+    return hmac.new(SECRET_KEY, data, hashlib.sha256).hexdigest()
 
-def load_license():
-    if not os.path.exists(LICENSE_FILE):
-        return None
+def get_machine_id() -> str:
+    """Generate a unique machine ID for binding."""
+    mac = uuid.getnode()
+    return hashlib.sha256(str(mac).encode()).hexdigest()
+
+def is_pro() -> bool:
+    """Check if current machine has a valid Pro license."""
+    if not LICENSE_FILE.exists():
+        return False
     try:
-        with open(LICENSE_FILE, "r") as f:
-            data = json.load(f)
-        return data.get("key")
-    except:
-        return None
+        data = json.loads(LICENSE_FILE.read_text())
+        key = data.get("key")
+        machine_id = data.get("machine_id")
+        signature = data.get("signature")
+        if not key or not machine_id or not signature:
+            return False
+        expected_sig = generate_hmac(key, machine_id)
+        return signature == expected_sig
+    except Exception:
+        return False
 
-# <<< This is the function you must have >>>
-def is_pro():
-    key = load_license()
+def validate_key_format(key: str) -> bool:
+    """Optional: check key pattern (16 alphanumeric chars)."""
+    return len(key) == 16 and key.isalnum()
+
+def save_license(key: str):
+    """Bind the key to this machine and save locally."""
+    machine_id = get_machine_id()
+    signature = generate_hmac(key, machine_id)
+    data = {
+        "key": key,
+        "machine_id": machine_id,
+        "signature": signature
+    }
+    LICENSE_FILE.write_text(json.dumps(data))
+
+def verify_key_offline(key: str) -> bool:
+    """Check if a key exists in your pre-generated list."""
     return key in VALID_KEYS
-
-def validate_key_format(key):
-    """
-    Basic format check: INSPECTO-PRO-YYYY-XXXX
-    """
-    if not isinstance(key, str):
-        return False
-    parts = key.split("-")
-    if len(parts) != 4:
-        return False
-    prefix, pro, year, serial = parts
-    return prefix == "INSPECTO" and pro == "PRO" and year.isdigit() and serial.isdigit()

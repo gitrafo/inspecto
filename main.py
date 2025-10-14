@@ -219,19 +219,15 @@ class InspectoApp(QWidget):
         if license_manager.is_pro():
             self.pro_status_label.setText("Status: Pro ✅")
             self.pro_status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.export_pdf_button.setEnabled(True)
         else:
             self.pro_status_label.setText("Status: Free 🔒")
             self.pro_status_label.setStyleSheet("color: red; font-weight: bold;")
+            self.export_pdf_button.setEnabled(False)
 
     def unlock_pro_features(self):
-        # Enable all Pro-only buttons/features
-        self.export_pdf_button.setEnabled(True)
-        
-        # Update Pro status label
-        self.update_pro_status()
-
-        # Optional: add a little visual cue
         QMessageBox.information(self, "Pro Unlocked", "All Pro features are now available.")
+        self.update_pro_status()
 
 
     def activate_pro(self):
@@ -246,10 +242,10 @@ class InspectoApp(QWidget):
                 QMessageBox.warning(self, "Invalid Key", "The license key format is incorrect.")
                 return
 
-            if key in license_manager.VALID_KEYS:
+            if license_manager.verify_key_offline(key):
                 license_manager.save_license(key)
-                QMessageBox.information(self, "Success", "Inspecto Pro activated!")
-                self.unlock_pro_features()  # unlock immediately
+                QMessageBox.information(self, "Success", "Inspecto Pro activated! ✅")
+                self.unlock_pro_features()
             else:
                 QMessageBox.warning(self, "Invalid Key", "This license key is not valid.")
 
