@@ -212,13 +212,13 @@ class InspectoApp(QWidget):
         self.custom_tab = QWidget()
         self.custom_tab_layout = QVBoxLayout(self.custom_tab)
 
-        from custom_tab import CustomImageGrid  # new grid with 16:9 boxes & spin
+        from custom_tab import CustomImageGrid
         self.custom_grid = CustomImageGrid()
         self.custom_grid.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Wrap in scroll area
+        # --- Wrap grid in scroll area with dynamic stretch ---
         self.custom_scroll = QScrollArea()
-        self.custom_scroll.setWidgetResizable(True)
+        self.custom_scroll.setWidgetResizable(True)  # allows horizontal stretch
         self.custom_scroll.setWidget(self.custom_grid)
         self.custom_tab_layout.addWidget(self.custom_scroll)
 
@@ -243,6 +243,7 @@ class InspectoApp(QWidget):
         self.load_button.clicked.connect(self.load_images)
         self.clear_button.clicked.connect(self.clear_images)
         self.export_pdf_button.clicked.connect(self.on_export_clicked)
+
 
 
 

@@ -1,190 +1,114 @@
-from PyQt6.QtWidgets import (
-    QWidget, QGridLayout, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QSizePolicy
-)
-from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+# custom_tab.py
 import os
-
+from PyQt6.QtWidgets import QWidget, QGridLayout, QLabel, QVBoxLayout, QSizePolicy
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
+from PIL import Image
 
 class CustomImageGrid(QWidget):
-    images_dropped = pyqtSignal(list)  # emitted when one or more images are dropped
+    images_dropped = pyqtSignal(list)  # emits list of file paths
 
-    def __init__(self):
+    def __init__(self, max_columns=4, img_width=350):
         super().__init__()
 
-        self.images = []  # store paths of loaded images
+        self.max_columns = max_columns
+        self.img_width = img_width
+        self.images = []
 
-        # --- Controls ---
-        controls = QHBoxLayout()
-        controls.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.layout = QGridLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
-        controls.addWidget(QLabel("Rows:"))
-        self.rows_spin = QSpinBox()
-        self.rows_spin.setRange(1, 10)
-        self.rows_spin.setValue(3)
-        controls.addWidget(self.rows_spin)
-
-        controls.addWidget(QLabel("Cols:"))
-        self.cols_spin = QSpinBox()
-        self.cols_spin.setRange(1, 10)
-        self.cols_spin.setValue(4)
-        controls.addWidget(self.cols_spin)
-
-        # --- Grid Layout ---
-        self.grid_layout = QGridLayout()
-        self.grid_layout.setContentsMargins(5, 5, 5, 5)
-        self.grid_layout.setSpacing(5)
-
-        # --- Main Layout ---
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(controls)
-        main_layout.addLayout(self.grid_layout)
-        main_layout.addStretch(1)
-        self.setLayout(main_layout)
-
-        # --- Connect ---
-        self.rows_spin.valueChanged.connect(self.update_grid)
-        self.cols_spin.valueChanged.connect(self.update_grid)
-
-        # --- Initialize grid ---
-        self.update_grid()
-
-    def update_grid(self):
-        """Rebuild grid with current images or placeholders."""
-        # clear layout
-        while self.grid_layout.count():
-            item = self.grid_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)
-
-        rows = self.rows_spin.value()
-        cols = self.cols_spin.value()
-
-        total_slots = rows * cols
-        for idx in range(total_slots):
-            if idx < len(self.images):
-                # already loaded image
-                path = self.images[idx]
-                placeholder = ImagePlaceholder()
-                placeholder.load_image(path)
-                placeholder.image_loaded.connect(self.on_image_loaded)
-            else:
-                # empty placeholder
-                placeholder = ImagePlaceholder()
-                placeholder.setText("Drop image")
-                placeholder.image_loaded.connect(self.on_image_loaded)
-            r = idx // cols
-            c = idx % cols
-            self.grid_layout.addWidget(placeholder, r, c)
-
-        self.adjust_grid()
-
-    def on_image_loaded(self, path):
-        """Triggered when an image is dropped."""
-        if path and path not in self.images:
-            self.images.append(path)
-            self.images_dropped.emit([path])
-            self.update_grid()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.adjust_grid()
-
-    def adjust_grid(self):
-        """Resize placeholders to fill area nicely without stretching."""
-        rows = self.rows_spin.value()
-        cols = self.cols_spin.value()
-        if rows == 0 or cols == 0:
-            return
-
-        total_width = self.width() - self.grid_layout.contentsMargins().left() - self.grid_layout.contentsMargins().right()
-        total_height = self.height() - self.grid_layout.contentsMargins().top() - self.grid_layout.contentsMargins().bottom() - 50
-
-        spacing_x = self.grid_layout.spacing() * (cols - 1)
-        spacing_y = self.grid_layout.spacing() * (rows - 1)
-
-        available_width = max(1, total_width - spacing_x)
-        available_height = max(1, total_height - spacing_y)
-
-        box_w = max(120, available_width // cols)
-        box_h = max(90, available_height // rows)
-
-        # Store last size to prevent recursive resize
-        if hasattr(self, "_last_box_size") and self._last_box_size == (box_w, box_h):
-            return
-        self._last_box_size = (box_w, box_h)
-
-        size = QSize(box_w, box_h)
-
-        for i in range(self.grid_layout.count()):
-            widget = self.grid_layout.itemAt(i).widget()
-            if widget:
-                widget.setMaximumSize(size)
-                widget.setMinimumSize(size)
-
-
-
-# -----------------------------------------------------------------------------
-# Image placeholder that accepts drag & drop
-# -----------------------------------------------------------------------------
-from PyQt6.QtWidgets import QLabel
-
-
-class ImagePlaceholder(QLabel):
-    image_loaded = pyqtSignal(str)
-
-    def __init__(self):
-        super().__init__()
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #666;
-                color: white;
-                border: 1px dashed #999;
-                border-radius: 8px;
-            }
-            QLabel:hover {
-                background-color: #777;
-            }
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Optional placeholder text
+        self.placeholder_label = QLabel("Drag images here")
+        self.placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_label.setStyleSheet("""
+            color: gray;
+            font-size: 18px;
+            border: 2px dashed #555;
+            padding: 50px;
         """)
+        self.layout.addWidget(self.placeholder_label, 0, 0, 1, self.max_columns)
 
-        self.image_path = None
+    def add_images(self, image_paths):
+        """Add images to the grid."""
+        # Remove placeholder if present
+        if self.placeholder_label and self.placeholder_label.parent():
+            self.placeholder_label.setParent(None)
+            self.placeholder_label = None
 
-    def setText(self, text):
-        super().setText(text)
+        start_index = len(self.images)
+        self.images.extend(image_paths)
+        self.update_grid(start_index)
 
-    # --- Drag and drop events ---
-    def dragEnterEvent(self, event):
+    def update_grid(self, start_index=0):
+        """Rebuilds grid from start_index to end."""
+        col_count = self.max_columns
+
+        for idx in range(start_index, len(self.images)):
+            path = self.images[idx]
+            pixmap = self.load_pixmap(path)
+
+            # --- Container with border ---
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(5, 5, 5, 5)
+            container_layout.setSpacing(5)
+            container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+            container.setStyleSheet("border: 2px solid #555; border-radius: 5px;")
+            container.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
+
+            # --- Image label ---
+            img_label = QLabel()
+            img_label.setPixmap(pixmap)
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img_label.setFixedWidth(self.img_width)
+            img_label.setFixedHeight(int(self.img_width * 9 / 16))
+            img_label.setStyleSheet("background-color: #222;")
+            container_layout.addWidget(img_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+            # --- Sample label (filename) ---
+            sample_label = QLabel(os.path.basename(path))
+            sample_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sample_label.setStyleSheet("color: white; font-size: 14px;")
+            container_layout.addWidget(sample_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+            row = idx // col_count
+            col = idx % col_count
+            self.layout.addWidget(container, row, col)
+
+    def load_pixmap(self, path):
+        """Load image as QPixmap and scale to width while keeping aspect ratio."""
+        try:
+            img = Image.open(path)
+            img_ratio = img.width / img.height
+            target_height = int(self.img_width / img_ratio)
+            img = img.resize((self.img_width, target_height), Image.LANCZOS)
+            pixmap = QPixmap(path).scaled(
+                self.img_width,
+                int(self.img_width * 9 / 16),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            return pixmap
+        except Exception as e:
+            print(f"Error loading {path}: {e}")
+            # Return empty placeholder pixmap
+            placeholder = QPixmap(self.img_width, int(self.img_width*9/16))
+            placeholder.fill(Qt.GlobalColor.darkGray)
+            return placeholder
+
+    # --- Drag & Drop support ---
+    def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event: QDropEvent):
         urls = event.mimeData().urls()
-        if not urls:
-            return
-        path = urls[0].toLocalFile()
-        if os.path.isfile(path) and path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
-            self.load_image(path)
-            self.image_loaded.emit(path)
-
-    def load_image(self, path):
-        """Display dropped image (scaled to fit)."""
-        self.image_path = path
-        img = QImage(path)
-        if img.isNull():
-            self.setText("Invalid image")
-            return
-        pixmap = QPixmap.fromImage(img)
-        scaled = pixmap.scaled(
-            self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        )
-        self.setPixmap(scaled)
-        self.setStyleSheet("background-color: #000; border: 1px solid #333;")
-
-    def resizeEvent(self, event):
-        """Ensure image scales smoothly when resizing window."""
-        super().resizeEvent(event)
-        if self.image_path:
-            self.load_image(self.image_path)
+        paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        if paths:
+            self.add_images(paths)
+            self.images_dropped.emit(paths)
