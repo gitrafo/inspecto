@@ -4,7 +4,7 @@ import subprocess
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel, QFileDialog, QVBoxLayout,
     QHBoxLayout, QGridLayout, QScrollArea, QProgressBar, QMessageBox, QSpinBox, 
-    QSizePolicy, QProgressDialog, QComboBox, QInputDialog, QMessageBox
+    QSizePolicy, QProgressDialog, QComboBox, QInputDialog, QTabWidget
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QIcon, QPalette, QColor
@@ -15,6 +15,7 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from io import BytesIO
 import license_manager
+from custom_tab import CustomImageGrid
 
 class ImageLoaderThread(QThread):
     progress_changed = pyqtSignal(int, int, str)  # current, total, tag
@@ -99,13 +100,20 @@ class InspectoApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Inspecto Tool - visual comparison")
+        
+        # --- Window sizing ---
         screen = QApplication.primaryScreen()
         available_size = screen.availableGeometry().size()
         self.resize(int(available_size.width() * 1), int(available_size.height() * 0.95))
 
+        # --- Main layout ---
         self.main_layout = QVBoxLayout(self)
 
-        # Výběr složky + tlačítka + max sloupců + velikost obrázku
+        # --- Tabs ---
+        self.tabs = QTabWidget()
+        self.main_layout.addWidget(self.tabs)
+
+        # --- Controls layout ---
         self.controls_layout = QHBoxLayout()
         self.folder_label = QLabel("Select folder:")
         self.select_button = QPushButton("Select folder")
@@ -130,48 +138,51 @@ class InspectoApp(QWidget):
         self.export_pdf_button = QPushButton("Export to PowerPoint")
         if not license_manager.is_pro():
             self.export_pdf_button.setToolTip("Pro feature – activate license to enable Export")
-        else:
-            self.export_pdf_button.setToolTip("")
 
-        # Nové: výběr tagu a skok
+        # Tag selection and jump
         self.tag_combo = QComboBox()
         self.tag_combo.setFixedWidth(200)
         self.jump_button = QPushButton("Skip to tag")
         self.jump_button.setEnabled(False)
         self.jump_button.clicked.connect(self.scroll_to_tag)
 
-        # Přidání widgetů vlevo
+        # Add widgets to controls layout
         self.controls_layout.addWidget(self.folder_label)
         self.controls_layout.addWidget(self.select_button)
         self.controls_layout.addWidget(self.load_button)
         self.controls_layout.addWidget(self.clear_button)
-
-        # Přidání stretch, aby následující widgety byly zarovnané doprava
         self.controls_layout.addStretch()
-
-        # Přidání widgetů doprava
         self.controls_layout.addWidget(self.max_columns_label)
         self.controls_layout.addWidget(self.max_columns_spin)
         self.controls_layout.addWidget(self.img_width_label)
         self.controls_layout.addWidget(self.img_width_spin)
-
-        # Přidání nových ovládacích prvků
         self.controls_layout.addWidget(self.tag_combo)
         self.controls_layout.addWidget(self.jump_button)
-
         self.controls_layout.addWidget(self.export_pdf_button)
 
-        self.main_layout.addLayout(self.controls_layout)
+        self.activate_button = QPushButton("Activate Pro")
+        self.activate_button.clicked.connect(self.activate_pro)
+        self.controls_layout.addWidget(self.activate_button)
 
-        # Progress bar a status
+        # Subscription status
+        self.pro_status_label = QLabel("")
+        self.controls_layout.addWidget(self.pro_status_label)
+        self.update_pro_status()
+
+        # --- Folder tab ---
+        self.folder_tab = QWidget()
+        self.folder_tab_layout = QVBoxLayout(self.folder_tab)
+        self.folder_tab_layout.addLayout(self.controls_layout)
+
+        # Progress bar and status
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.hide()
         self.status_label = QLabel("")
-        self.main_layout.addWidget(self.progress_bar)
-        self.main_layout.addWidget(self.status_label)
+        self.folder_tab_layout.addWidget(self.progress_bar)
+        self.folder_tab_layout.addWidget(self.status_label)
 
-        # Scroll area pro obrázky
+        # Scroll area for images
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.images_widget = QWidget()
@@ -179,45 +190,52 @@ class InspectoApp(QWidget):
         self.grid_layout.setContentsMargins(5, 5, 5, 5)
         self.grid_layout.setSpacing(10)
         self.scroll_area.setWidget(self.images_widget)
-        self.main_layout.addWidget(self.scroll_area)
+        self.folder_tab_layout.addWidget(self.scroll_area)
 
-        # Lighten the scrollbar handle for dark palette
+        # Scrollbar styling
         scroll_style = """
         QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-            background: #2a82da !important;   /* same as QPalette.Highlight */
+            background: #2a82da !important;
             border-radius: 4px;
             min-height: 20px;
             min-width: 20px;
         }
-
         QScrollBar:vertical, QScrollBar:horizontal {
-            background: #353535;  /* track background matches your palette Base */
+            background: #353535;
         }
         """
         self.scroll_area.setStyleSheet(scroll_style)
 
-        self.selected_folder = None
-        self.tag_widgets = {}  # tag -> QWidget
+        # Add folder tab to tabs
+        self.tabs.addTab(self.folder_tab, "Folder View")
 
-        # Signály
+        # --- Custom drag-and-drop tab ---
+        self.custom_tab = QWidget()
+        self.custom_tab_layout = QVBoxLayout(self.custom_tab)
+
+        # Add CustomImageGrid inside
+        self.custom_grid = CustomImageGrid(default_columns=4, default_rows=3, max_width=self.img_width_spin.value())
+        self.custom_tab_layout.addWidget(self.custom_grid)
+        self.custom_grid.images_dropped.connect(self.on_custom_images_loaded)
+
+        self.tabs.addTab(self.custom_tab, "Custom Images")
+
+        # --- Internal state ---
+        self.selected_folder = None
+        self.tag_widgets = {}
+        self.image_loader_thread = None
+        self.loaded_images_pil_cache = {}
+
+        # --- Signals ---
         self.select_button.clicked.connect(self.select_folder)
         self.load_button.clicked.connect(self.load_images)
         self.clear_button.clicked.connect(self.clear_images)
         self.export_pdf_button.clicked.connect(self.on_export_clicked)
 
-        self.activate_button = QPushButton("Activate Pro")
-        self.activate_button.clicked.connect(self.activate_pro)
-        self.controls_layout.addWidget(self.activate_button)
+        # Update custom grid width dynamically
+        self.img_width_spin.valueChanged.connect(lambda w: setattr(self.custom_grid, 'max_width', w))
 
-
-        self.image_loader_thread = None
-        self.loaded_images_pil_cache = {}  # always exists
-
-        # Subscription status
-        self.pro_status_label = QLabel("")
-        self.controls_layout.addWidget(self.pro_status_label)
-  
-        self.update_pro_status()
+        self.custom_grid.images_dropped.connect(self.on_custom_images_loaded)
 
     def update_pro_status(self):
         if license_manager.is_pro():
@@ -585,6 +603,11 @@ class InspectoApp(QWidget):
 
         QMessageBox.information(self, "Done", f"PowerPoint slides saved to:\n{filename}")
 
+    def on_custom_images_loaded(self, image_paths):
+        """Handle images dropped in the Custom Images tab."""
+        print("Dropped images:", image_paths)
+        # Optionally, update something like a counter or status label:
+        self.status_label.setText(f"{len(image_paths)} custom images loaded")
 
 
 if __name__ == "__main__":
