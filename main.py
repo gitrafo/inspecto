@@ -15,7 +15,6 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from io import BytesIO
 import license_manager
-from custom_tab import CustomImageGrid
 
 class ImageLoaderThread(QThread):
     progress_changed = pyqtSignal(int, int, str)  # current, total, tag
@@ -100,7 +99,7 @@ class InspectoApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Inspecto Tool - visual comparison")
-        
+
         # --- Window sizing ---
         screen = QApplication.primaryScreen()
         available_size = screen.availableGeometry().size()
@@ -113,7 +112,7 @@ class InspectoApp(QWidget):
         self.tabs = QTabWidget()
         self.main_layout.addWidget(self.tabs)
 
-        # --- Controls layout ---
+        # --- Controls layout for folder tab ---
         self.controls_layout = QHBoxLayout()
         self.folder_label = QLabel("Select folder:")
         self.select_button = QPushButton("Select folder")
@@ -209,15 +208,28 @@ class InspectoApp(QWidget):
         # Add folder tab to tabs
         self.tabs.addTab(self.folder_tab, "Folder View")
 
-        # --- Custom drag-and-drop tab ---
+        # --- Custom Images tab ---
         self.custom_tab = QWidget()
         self.custom_tab_layout = QVBoxLayout(self.custom_tab)
 
-        # Add CustomImageGrid inside
-        self.custom_grid = CustomImageGrid(default_columns=4, default_rows=3, max_width=self.img_width_spin.value())
-        self.custom_tab_layout.addWidget(self.custom_grid)
+        from custom_tab import CustomImageGrid  # new grid with 16:9 boxes & spin
+        self.custom_grid = CustomImageGrid()
+        self.custom_grid.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Wrap in scroll area
+        self.custom_scroll = QScrollArea()
+        self.custom_scroll.setWidgetResizable(True)
+        self.custom_scroll.setWidget(self.custom_grid)
+        self.custom_tab_layout.addWidget(self.custom_scroll)
+
+        # Status label for custom tab
+        self.custom_status_label = QLabel("Drag images here")
+        self.custom_tab_layout.addWidget(self.custom_status_label)
+
+        # Connect signal for dropped images
         self.custom_grid.images_dropped.connect(self.on_custom_images_loaded)
 
+        # Add custom tab to tabs
         self.tabs.addTab(self.custom_tab, "Custom Images")
 
         # --- Internal state ---
@@ -226,16 +238,14 @@ class InspectoApp(QWidget):
         self.image_loader_thread = None
         self.loaded_images_pil_cache = {}
 
-        # --- Signals ---
+        # --- Signals for folder tab ---
         self.select_button.clicked.connect(self.select_folder)
         self.load_button.clicked.connect(self.load_images)
         self.clear_button.clicked.connect(self.clear_images)
         self.export_pdf_button.clicked.connect(self.on_export_clicked)
 
-        # Update custom grid width dynamically
-        self.img_width_spin.valueChanged.connect(lambda w: setattr(self.custom_grid, 'max_width', w))
 
-        self.custom_grid.images_dropped.connect(self.on_custom_images_loaded)
+
 
     def update_pro_status(self):
         if license_manager.is_pro():

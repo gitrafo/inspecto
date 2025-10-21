@@ -1,194 +1,190 @@
-# custom_tab.py
-import os
 from PyQt6.QtWidgets import (
-    QWidget, QGridLayout, QLabel, QSizePolicy, QVBoxLayout,
-    QHBoxLayout, QSpinBox, QPushButton
+    QWidget, QGridLayout, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
+import os
 
 
-class ClickableLabel(QLabel):
-    clicked = pyqtSignal()
+class CustomImageGrid(QWidget):
+    images_dropped = pyqtSignal(list)  # emitted when one or more images are dropped
 
-    def mousePressEvent(self, event):
-        self.clicked.emit()
-        super().mousePressEvent(event)
+    def __init__(self):
+        super().__init__()
+
+        self.images = []  # store paths of loaded images
+
+        # --- Controls ---
+        controls = QHBoxLayout()
+        controls.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        controls.addWidget(QLabel("Rows:"))
+        self.rows_spin = QSpinBox()
+        self.rows_spin.setRange(1, 10)
+        self.rows_spin.setValue(3)
+        controls.addWidget(self.rows_spin)
+
+        controls.addWidget(QLabel("Cols:"))
+        self.cols_spin = QSpinBox()
+        self.cols_spin.setRange(1, 10)
+        self.cols_spin.setValue(4)
+        controls.addWidget(self.cols_spin)
+
+        # --- Grid Layout ---
+        self.grid_layout = QGridLayout()
+        self.grid_layout.setContentsMargins(5, 5, 5, 5)
+        self.grid_layout.setSpacing(5)
+
+        # --- Main Layout ---
+        main_layout = QVBoxLayout()
+        main_layout.addLayout(controls)
+        main_layout.addLayout(self.grid_layout)
+        main_layout.addStretch(1)
+        self.setLayout(main_layout)
+
+        # --- Connect ---
+        self.rows_spin.valueChanged.connect(self.update_grid)
+        self.cols_spin.valueChanged.connect(self.update_grid)
+
+        # --- Initialize grid ---
+        self.update_grid()
+
+    def update_grid(self):
+        """Rebuild grid with current images or placeholders."""
+        # clear layout
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+
+        rows = self.rows_spin.value()
+        cols = self.cols_spin.value()
+
+        total_slots = rows * cols
+        for idx in range(total_slots):
+            if idx < len(self.images):
+                # already loaded image
+                path = self.images[idx]
+                placeholder = ImagePlaceholder()
+                placeholder.load_image(path)
+                placeholder.image_loaded.connect(self.on_image_loaded)
+            else:
+                # empty placeholder
+                placeholder = ImagePlaceholder()
+                placeholder.setText("Drop image")
+                placeholder.image_loaded.connect(self.on_image_loaded)
+            r = idx // cols
+            c = idx % cols
+            self.grid_layout.addWidget(placeholder, r, c)
+
+        self.adjust_grid()
+
+    def on_image_loaded(self, path):
+        """Triggered when an image is dropped."""
+        if path and path not in self.images:
+            self.images.append(path)
+            self.images_dropped.emit([path])
+            self.update_grid()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.adjust_grid()
+
+    def adjust_grid(self):
+        """Resize placeholders to fill area nicely without stretching."""
+        rows = self.rows_spin.value()
+        cols = self.cols_spin.value()
+        if rows == 0 or cols == 0:
+            return
+
+        total_width = self.width() - self.grid_layout.contentsMargins().left() - self.grid_layout.contentsMargins().right()
+        total_height = self.height() - self.grid_layout.contentsMargins().top() - self.grid_layout.contentsMargins().bottom() - 50
+
+        spacing_x = self.grid_layout.spacing() * (cols - 1)
+        spacing_y = self.grid_layout.spacing() * (rows - 1)
+
+        available_width = max(1, total_width - spacing_x)
+        available_height = max(1, total_height - spacing_y)
+
+        box_w = max(120, available_width // cols)
+        box_h = max(90, available_height // rows)
+
+        # Store last size to prevent recursive resize
+        if hasattr(self, "_last_box_size") and self._last_box_size == (box_w, box_h):
+            return
+        self._last_box_size = (box_w, box_h)
+
+        size = QSize(box_w, box_h)
+
+        for i in range(self.grid_layout.count()):
+            widget = self.grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setMaximumSize(size)
+                widget.setMinimumSize(size)
 
 
-class DroppableLabel(QLabel):
-    """A QLabel that scales its image to fill the current label size."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+
+# -----------------------------------------------------------------------------
+# Image placeholder that accepts drag & drop
+# -----------------------------------------------------------------------------
+from PyQt6.QtWidgets import QLabel
+
+
+class ImagePlaceholder(QLabel):
+    image_loaded = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setText("Drag image here")
-        self.setStyleSheet("""
-            border: 1px dashed gray;
-            min-width: 80px;
-            min-height: 80px;
-            background-color: #d3d3d3;
-            color: #555555;
-            font-weight: bold;
-        """)
         self.setAcceptDrops(True)
-        self.pixmap_path = None
-        self.original_pixmap = None  # store original pixmap for rescaling
+        self.setStyleSheet("""
+            QLabel {
+                background-color: #666;
+                color: white;
+                border: 1px dashed #999;
+                border-radius: 8px;
+            }
+            QLabel:hover {
+                background-color: #777;
+            }
+        """)
 
+        self.image_path = None
+
+    def setText(self, text):
+        super().setText(text)
+
+    # --- Drag and drop events ---
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
-        if urls:
-            path = urls[0].toLocalFile()
-            if os.path.isfile(path):
-                pixmap = QPixmap(path)
-                self.set_pixmap(pixmap)
-                self.pixmap_path = path
-        event.acceptProposedAction()
+        if not urls:
+            return
+        path = urls[0].toLocalFile()
+        if os.path.isfile(path) and path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+            self.load_image(path)
+            self.image_loaded.emit(path)
 
-    def set_pixmap(self, pixmap: QPixmap):
-        """Store original pixmap and scale it to current label size."""
-        self.original_pixmap = pixmap
-        self.rescale_pixmap()
+    def load_image(self, path):
+        """Display dropped image (scaled to fit)."""
+        self.image_path = path
+        img = QImage(path)
+        if img.isNull():
+            self.setText("Invalid image")
+            return
+        pixmap = QPixmap.fromImage(img)
+        scaled = pixmap.scaled(
+            self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        self.setPixmap(scaled)
+        self.setStyleSheet("background-color: #000; border: 1px solid #333;")
 
     def resizeEvent(self, event):
+        """Ensure image scales smoothly when resizing window."""
         super().resizeEvent(event)
-        self.rescale_pixmap()
-
-    def rescale_pixmap(self):
-        if self.original_pixmap:
-            scaled = self.original_pixmap.scaled(
-                self.width(), self.height(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.setPixmap(scaled)
-            self.setText("")  # hide placeholder if pixmap exists
-        else:
-            self.setText("Drag image here")
-
-
-
-class CustomImageGrid(QWidget):
-    """Grid of DroppableLabels with adjustable rows and columns, images keep max width."""
-    images_dropped = pyqtSignal(list)
-
-    def __init__(self, default_columns=4, default_rows=3, max_width=200):
-        super().__init__()
-        self.max_width = max_width
-        self.labels = []
-        self.images = []
-
-        self.layout = QVBoxLayout(self)
-
-        # Controls
-        self.control_layout = QHBoxLayout()
-        self.cols_spin = QSpinBox()
-        self.cols_spin.setRange(1, 10)
-        self.cols_spin.setValue(default_columns)
-        self.cols_spin.valueChanged.connect(self.build_grid)
-
-        self.rows_spin = QSpinBox()
-        self.rows_spin.setRange(1, 10)
-        self.rows_spin.setValue(default_rows)
-        self.rows_spin.valueChanged.connect(self.build_grid)
-
-        self.clear_button = QPushButton("Clear Grid")
-        self.clear_button.clicked.connect(self.clear_grid)
-
-        self.control_layout.addWidget(QLabel("Columns:"))
-        self.control_layout.addWidget(self.cols_spin)
-        self.control_layout.addWidget(QLabel("Rows:"))
-        self.control_layout.addWidget(self.rows_spin)
-        self.control_layout.addStretch()
-        self.control_layout.addWidget(self.clear_button)
-        self.layout.addLayout(self.control_layout)
-
-        # Grid container
-        self.grid_widget = QWidget()
-        self.grid_layout = QGridLayout(self.grid_widget)
-        self.grid_layout.setSpacing(10)
-        self.layout.addWidget(self.grid_widget)
-
-        self.build_grid()
-
-    def build_grid(self):
-        """Rebuild grid based on current rows, columns, preserving existing images."""
-        # save current images
-        existing_images = [lbl.pixmap_path for lbl in self.labels if lbl.pixmap_path]
-
-        # clear old labels
-        for lbl in self.labels:
-            self.grid_layout.removeWidget(lbl)
-            lbl.deleteLater()
-        self.labels.clear()
-
-        cols = self.cols_spin.value()
-        rows = self.rows_spin.value()
-        total_images = len(existing_images)
-        required_rows = max(rows, (total_images + cols - 1) // cols)
-
-        idx = 0
-        for r in range(required_rows):
-            for c in range(cols):
-                lbl = DroppableLabel()
-                lbl.setAcceptDrops(True)
-                lbl.dropEvent = self.make_drop_event(lbl)
-
-                # restore existing image if available
-                if idx < total_images:
-                    path = existing_images[idx]
-                    pixmap = QPixmap(path)
-                    lbl.set_pixmap(pixmap)  # ✅ store original pixmap for rescaling
-                    lbl.pixmap_path = path
-                else:
-                    lbl.setText("Drag image here")
-                    lbl.pixmap_path = None
-
-                self.grid_layout.addWidget(lbl, r, c)
-                self.labels.append(lbl)
-                idx += 1
-
-        # update internal images list
-        self.images = [lbl.pixmap_path for lbl in self.labels if lbl.pixmap_path]
-        self.images_dropped.emit(self.images)
-
-    def make_drop_event(self, lbl):
-        def dropEvent(event):
-            urls = event.mimeData().urls()
-            if urls:
-                path = urls[0].toLocalFile()
-                if os.path.isfile(path):
-                    pixmap = QPixmap(path)
-                    
-                    # Resize the label to max_width while keeping aspect ratio
-                    w, h = pixmap.width(), pixmap.height()
-                    max_w = self.max_width
-                    scale_factor = min(max_w / w, 1.0)  # never upscale
-                    lbl.setFixedSize(int(w * scale_factor), int(h * scale_factor))
-                    
-                    lbl.set_pixmap(pixmap)  # store original and rescale
-                    lbl.pixmap_path = path
-
-                    if path not in self.images:
-                        self.images.append(path)
-                    self.images_dropped.emit(self.images)
-            event.acceptProposedAction()
-        return dropEvent
-
-    def clear_grid(self):
-        self.images.clear()
-        for lbl in self.labels:
-            lbl.clear()
-            lbl.pixmap_path = None
-            lbl.setText("Drag image here")
-        self.images_dropped.emit([])
-
-    def get_images(self):
-        return [lbl.pixmap_path for lbl in self.labels if lbl.pixmap_path]
-
-
-
-    
+        if self.image_path:
+            self.load_image(self.image_path)
