@@ -80,6 +80,33 @@ class CustomImageGrid(QWidget):
             col = idx % col_count
             self.layout.addWidget(container, row, col)
 
+    def clear_all(self):
+        """Removes all images and resets grid with subtle placeholder."""
+        # Clear internal storage
+        self.images.clear()
+        self.images_dropped.emit([])  # emit empty list to notify parent
+
+        # Remove all widgets from layout
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Add subtle placeholder spanning full width
+        placeholder = QLabel("Drag images here")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet("""
+            color: gray;
+            font-size: 16px;
+            border: 1px dashed #888;
+            padding: 20px;
+            background-color: #333;
+        """)
+        self.layout.addWidget(placeholder, 0, 0, 1, self.max_columns)
+
+
+
     def load_pixmap(self, path):
         """Load image as QPixmap and scale to width while keeping aspect ratio."""
         try:

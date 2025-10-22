@@ -218,16 +218,27 @@ class InspectoApp(QWidget):
 
         # --- Wrap grid in scroll area with dynamic stretch ---
         self.custom_scroll = QScrollArea()
-        self.custom_scroll.setWidgetResizable(True)  # allows horizontal stretch
+        self.custom_scroll.setWidgetResizable(True)
         self.custom_scroll.setWidget(self.custom_grid)
         self.custom_tab_layout.addWidget(self.custom_scroll)
 
-        # Status label for custom tab
+        # Top controls layout for custom tab
+        self.custom_controls_layout = QHBoxLayout()
+        self.custom_clear_button = QPushButton("Clear")
+        self.custom_clear_button.setEnabled(False)
+        self.custom_clear_button.setFixedSize(100, 30)  # smaller fixed button
+        self.custom_controls_layout.addWidget(self.custom_clear_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.custom_controls_layout.addStretch()  # push anything else to right
+
+        self.custom_tab_layout.addLayout(self.custom_controls_layout)
+
+        # Status label below controls
         self.custom_status_label = QLabel("Drag images here")
         self.custom_tab_layout.addWidget(self.custom_status_label)
 
         # Connect signal for dropped images
         self.custom_grid.images_dropped.connect(self.on_custom_images_loaded)
+        self.custom_clear_button.clicked.connect(self.clear_custom_images)  # ✅ NEW CONNECTION
 
         # Add custom tab to tabs
         self.tabs.addTab(self.custom_tab, "Custom Images")
@@ -245,6 +256,11 @@ class InspectoApp(QWidget):
         self.export_pdf_button.clicked.connect(self.on_export_clicked)
 
 
+    def clear_custom_images(self):
+        """Clears all custom images from the custom grid."""
+        self.custom_grid.clear_all()
+        self.custom_clear_button.setEnabled(False)
+        self.custom_status_label.setText("Custom images cleared.")
 
 
 
@@ -452,6 +468,7 @@ class InspectoApp(QWidget):
         self.jump_button.setEnabled(False)
         self.tag_combo.clear()
         self.tag_widgets.clear()
+        
 
     def open_external_viewer(self, filepath):
         if not filepath or not os.path.isfile(filepath):
@@ -618,7 +635,8 @@ class InspectoApp(QWidget):
         """Handle images dropped in the Custom Images tab."""
         print("Dropped images:", image_paths)
         # Optionally, update something like a counter or status label:
-        self.status_label.setText(f"{len(image_paths)} custom images loaded")
+        # self.status_label.setText(f"{len(image_paths)} custom images loaded")
+        self.custom_clear_button.setEnabled(True)
 
 
 if __name__ == "__main__":
